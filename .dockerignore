@@ -1,0 +1,14 @@
+.git
+.github
+.idea
+.vscode
+bin
+dist
+coverage
+data
+tmp
+.volumes
+*.log
+.env*
+docs/*.docx
+docs/**/*.png

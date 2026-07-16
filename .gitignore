@@ -1,0 +1,46 @@
+# Go build and test output
+/bin/
+/dist/
+/coverage/
+coverage.out
+coverage.html
+*.coverprofile
+*.prof
+*.test
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Runtime and local data
+/data/
+/tmp/
+/.volumes/
+*.log
+*.pid
+
+# Local configuration and secrets
+.env
+.env.*
+!.env.example
+filestore.config.json
+config.local.json
+*.local.yaml
+*.local.yml
+*.pem
+*.key
+
+# Editors and operating systems
+.idea/
+.vscode/
+*.iml
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Tool caches
+.cache/
+.golangci-cache/
+.redocly/

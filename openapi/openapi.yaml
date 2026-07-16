@@ -1,0 +1,950 @@
+openapi: 3.1.0
+info:
+  title: FileStore API
+  version: 0.1.0
+  description: |
+    Contract for the FileStore MVP. Health operations are implemented in stage 0;
+    product operations marked as planned are implemented in subsequent stages.
+servers:
+  - url: /
+    description: Same origin as the API endpoint
+tags:
+  - name: Health
+    description: Process liveness and readiness
+  - name: Authentication
+    description: Registration, login, logout, and current identity
+  - name: Workspaces
+    description: Base/private workspaces and membership
+  - name: Files
+    description: File metadata, versions, encoding, and content
+  - name: Updates
+    description: Candidate upload, diff, resolve, and reject lifecycle
+  - name: Locks
+    description: File-level write locks
+  - name: Links
+    description: Automatically created current and version links
+security:
+  - bearerAuth: []
+paths:
+  /health/live:
+    get:
+      tags: [Health]
+      summary: Check whether the API process is alive
+      operationId: getLiveness
+      security: []
+      responses:
+        "200":
+          $ref: "#/components/responses/HealthResponse"
+        "400":
+          $ref: "#/components/responses/ProblemResponse"
+  /health/ready:
+    get:
+      tags: [Health]
+      summary: Check whether the API can receive traffic
+      operationId: getReadiness
+      security: []
+      responses:
+        "200":
+          $ref: "#/components/responses/HealthResponse"
+        "400":
+          $ref: "#/components/responses/ProblemResponse"
+        "503":
+          $ref: "#/components/responses/ProblemResponse"
+  /auth/register:
+    post:
+      tags: [Authentication]
+      summary: Register a user
+      operationId: registerUser
+      security: []
+      x-implementation-status: planned-stage-1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RegisterRequest"
+      responses:
+        "201":
+          description: Registered user and an authentication token
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthResult"
+        "400":
+          $ref: "#/components/responses/ProblemResponse"
+        "409":
+          $ref: "#/components/responses/ProblemResponse"
+  /auth/login:
+    post:
+      tags: [Authentication]
+      summary: Log in with email and password
+      operationId: loginUser
+      security: []
+      x-implementation-status: planned-stage-1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LoginRequest"
+      responses:
+        "200":
+          description: Authentication token and current user
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthResult"
+        "400":
+          $ref: "#/components/responses/ProblemResponse"
+        "401":
+          $ref: "#/components/responses/ProblemResponse"
+  /auth/logout:
+    post:
+      tags: [Authentication]
+      summary: Revoke the current authentication token
+      operationId: logoutUser
+      x-implementation-status: planned-stage-1
+      responses:
+        "204":
+          description: Token revoked
+        "401":
+          $ref: "#/components/responses/ProblemResponse"
+  /auth/me:
+    get:
+      tags: [Authentication]
+      summary: Get the authenticated user
+      operationId: getCurrentUser
+      x-implementation-status: planned-stage-1
+      responses:
+        "200":
+          description: Current user
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+        "401":
+          $ref: "#/components/responses/ProblemResponse"
+  /workspaces/base:
+    get:
+      tags: [Workspaces]
+      summary: Get the reserved base workspace
+      operationId: getBaseWorkspace
+      x-implementation-status: planned-stage-1
+      responses:
+        "200":
+          description: Base workspace
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Workspace"
+        "401":
+          $ref: "#/components/responses/ProblemResponse"
+  /workspaces:
+    get:
+      tags: [Workspaces]
+      summary: List workspaces available to the current user
+      operationId: listWorkspaces
+      x-implementation-status: planned-stage-1
+      responses:
+        "200":
+          description: Workspaces
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Workspace"
+        "401":
+          $ref: "#/components/responses/ProblemResponse"
+    post:
+      tags: [Workspaces]
+      summary: Create a private workspace
+      operationId: createWorkspace
+      x-implementation-status: planned-stage-1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateWorkspaceRequest"
+      responses:
+        "201":
+          description: Created workspace
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Workspace"
+        "400":
+          $ref: "#/components/responses/ProblemResponse"
+        "401":
+          $ref: "#/components/responses/ProblemResponse"
+        "409":
+          $ref: "#/components/responses/ProblemResponse"
+  /workspaces/{workspaceId}:
+    parameters:
+      - $ref: "#/components/parameters/WorkspaceID"
+    get:
+      tags: [Workspaces]
+      summary: Get a workspace
+      operationId: getWorkspace
+      x-implementation-status: planned-stage-1
+      responses:
+        "200":
+          description: Workspace
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Workspace"
+        "401":
+          $ref: "#/components/responses/ProblemResponse"
+        "404":
+          $ref: "#/components/responses/ProblemResponse"
+  /workspaces/{workspaceId}/members/{userId}:
+    parameters:
+      - $ref: "#/components/parameters/WorkspaceID"
+      - $ref: "#/components/parameters/UserID"
+    put:
+      tags: [Workspaces]
+      summary: Add or update a workspace member
+      operationId: putWorkspaceMember
+      x-implementation-status: planned-stage-1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MemberRoleRequest"
+      responses:
+        "200":
+          description: Workspace member
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WorkspaceMember"
+        "400":
+          $ref: "#/components/responses/ProblemResponse"
+        "403":
+          $ref: "#/components/responses/ProblemResponse"
+        "404":
+          $ref: "#/components/responses/ProblemResponse"
+    delete:
+      tags: [Workspaces]
+      summary: Remove a workspace member
+      operationId: removeWorkspaceMember
+      x-implementation-status: planned-stage-1
+      responses:
+        "204":
+          description: Member removed
+        "403":
+          $ref: "#/components/responses/ProblemResponse"
+        "404":
+          $ref: "#/components/responses/ProblemResponse"
+        "409":
+          $ref: "#/components/responses/ProblemResponse"
+  /workspaces/{workspaceId}/files:
+    parameters:
+      - $ref: "#/components/parameters/WorkspaceID"
+    get:
+      tags: [Files]
+      summary: List files in a workspace
+      operationId: listFiles
+      x-implementation-status: planned-stage-2
+      responses:
+        "200":
+          description: Files
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/File"
+        "401":
+          $ref: "#/components/responses/ProblemResponse"
+        "404":
+          $ref: "#/components/responses/ProblemResponse"
+    post:
+      tags: [Files]
+      summary: Upload a file and create version 1
+      operationId: createFile
+      x-implementation-status: planned-stage-2
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [content]
+              properties:
+                name:
+                  type: string
+                  minLength: 1
+                text_encoding:
+                  type: string
+                  default: utf-8
+                content:
+                  type: string
+                  format: binary
+      responses:
+        "201":
+          description: Created file
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/File"
+        "400":
+          $ref: "#/components/responses/ProblemResponse"
+        "409":
+          $ref: "#/components/responses/ProblemResponse"
+        "413":
+          $ref: "#/components/responses/ProblemResponse"
+        "423":
+          $ref: "#/components/responses/ProblemResponse"
+  /files/{fileId}:
+    parameters:
+      - $ref: "#/components/parameters/FileID"
+    get:
+      tags: [Files]
+      summary: Get file metadata
+      operationId: getFile
+      x-implementation-status: planned-stage-2
+      responses:
+        "200":
+          description: File metadata
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/File"
+        "404":
+          $ref: "#/components/responses/ProblemResponse"
+  /files/{fileId}/encoding:
+    parameters:
+      - $ref: "#/components/parameters/FileID"
+    patch:
+      tags: [Files]
+      summary: Change the text encoding used to interpret file bytes
+      operationId: updateFileEncoding
+      x-implementation-status: planned-stage-2
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/EncodingRequest"
+      responses:
+        "200":
+          description: Updated file metadata
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/File"
+        "400":
+          $ref: "#/components/responses/ProblemResponse"
+        "403":
+          $ref: "#/components/responses/ProblemResponse"
+        "404":
+          $ref: "#/components/responses/ProblemResponse"
+        "423":
+          $ref: "#/components/responses/ProblemResponse"
+  /files/{fileId}/versions:
+    parameters:
+      - $ref: "#/components/parameters/FileID"
+    get:
+      tags: [Files]
+      summary: List published file versions
+      operationId: listFileVersions
+      x-implementation-status: planned-stage-2
+      responses:
+        "200":
+          description: Versions ordered by version number descending
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/FileVersion"
+        "404":
+          $ref: "#/components/responses/ProblemResponse"
+  /files/{fileId}/content:
+    parameters:
+      - $ref: "#/components/parameters/FileID"
+      - $ref: "#/components/parameters/VersionNumber"
+    get:
+      tags: [Files]
+      summary: Download current or selected file bytes
+      operationId: downloadFile
+      x-implementation-status: planned-stage-2
+      responses:
+        "200":
+          description: Immutable file bytes
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+        "404":
+          $ref: "#/components/responses/ProblemResponse"
+  /files/{fileId}/updates:
+    parameters:
+      - $ref: "#/components/parameters/FileID"
+    post:
+      tags: [Updates]
+      summary: Upload a candidate and create an update session
+      operationId: createUpdateSession
+      x-implementation-status: planned-stage-3
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [content]
+              properties:
+                content:
+                  type: string
+                  format: binary
+      responses:
+        "201":
+          description: Active update session
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UpdateSession"
+        "409":
+          $ref: "#/components/responses/ProblemResponse"
+        "413":
+          $ref: "#/components/responses/ProblemResponse"
+        "423":
+          $ref: "#/components/responses/ProblemResponse"
+  /files/{fileId}/updates/{sessionId}/diff:
+    parameters:
+      - $ref: "#/components/parameters/FileID"
+      - $ref: "#/components/parameters/SessionID"
+    get:
+      tags: [Updates]
+      summary: Compare the candidate with its base version
+      operationId: getUpdateDiff
+      x-implementation-status: planned-stage-3
+      responses:
+        "200":
+          description: Bounded diff result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DiffResult"
+        "404":
+          $ref: "#/components/responses/ProblemResponse"
+        "409":
+          $ref: "#/components/responses/ProblemResponse"
+  /files/{fileId}/updates/{sessionId}/resolve:
+    parameters:
+      - $ref: "#/components/parameters/FileID"
+      - $ref: "#/components/parameters/SessionID"
+    post:
+      tags: [Updates]
+      summary: Publish the candidate as the next version
+      operationId: resolveUpdateSession
+      x-implementation-status: planned-stage-4
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      responses:
+        "200":
+          description: Published version; repeated requests return the same version
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FileVersion"
+        "409":
+          $ref: "#/components/responses/ProblemResponse"
+        "423":
+          $ref: "#/components/responses/ProblemResponse"
+  /files/{fileId}/updates/{sessionId}/reject:
+    parameters:
+      - $ref: "#/components/parameters/FileID"
+      - $ref: "#/components/parameters/SessionID"
+    post:
+      tags: [Updates]
+      summary: Reject an update candidate
+      operationId: rejectUpdateSession
+      x-implementation-status: planned-stage-4
+      responses:
+        "200":
+          description: Rejected update session
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UpdateSession"
+        "409":
+          $ref: "#/components/responses/ProblemResponse"
+  /files/{fileId}/lock:
+    parameters:
+      - $ref: "#/components/parameters/FileID"
+    get:
+      tags: [Locks]
+      summary: Get the active file lock
+      operationId: getFileLock
+      x-implementation-status: planned-stage-5
+      responses:
+        "200":
+          description: Active lock
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FileLock"
+        "404":
+          $ref: "#/components/responses/ProblemResponse"
+    post:
+      tags: [Locks]
+      summary: Lock a file for writes
+      operationId: lockFile
+      x-implementation-status: planned-stage-5
+      responses:
+        "201":
+          description: Active lock
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FileLock"
+        "409":
+          $ref: "#/components/responses/ProblemResponse"
+        "423":
+          $ref: "#/components/responses/ProblemResponse"
+    delete:
+      tags: [Locks]
+      summary: Unlock a file
+      operationId: unlockFile
+      description: Allowed to the file creator, locker, workspace editor or owner, and superadmin.
+      x-implementation-status: planned-stage-5
+      responses:
+        "204":
+          description: Lock released
+        "403":
+          $ref: "#/components/responses/ProblemResponse"
+        "404":
+          $ref: "#/components/responses/ProblemResponse"
+  /files/{fileId}/links:
+    parameters:
+      - $ref: "#/components/parameters/FileID"
+    get:
+      tags: [Links]
+      summary: List automatically created links for a file and its versions
+      operationId: listFileLinks
+      x-implementation-status: planned-stage-6
+      responses:
+        "200":
+          description: Current and version links
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/FileLink"
+        "404":
+          $ref: "#/components/responses/ProblemResponse"
+  /files/{fileId}/links/{linkId}:
+    parameters:
+      - $ref: "#/components/parameters/FileID"
+      - $ref: "#/components/parameters/LinkID"
+    delete:
+      tags: [Links]
+      summary: Revoke an automatically created link
+      operationId: revokeFileLink
+      x-implementation-status: planned-stage-6
+      responses:
+        "204":
+          description: Link revoked without replacement
+        "403":
+          $ref: "#/components/responses/ProblemResponse"
+        "404":
+          $ref: "#/components/responses/ProblemResponse"
+        "423":
+          $ref: "#/components/responses/ProblemResponse"
+  /links/{token}/content:
+    parameters:
+      - $ref: "#/components/parameters/LinkToken"
+    get:
+      tags: [Links]
+      summary: Download content through a current or version link
+      operationId: downloadByLink
+      security:
+        - {}
+        - bearerAuth: []
+      description: Base links are public. Private workspace links additionally require bearer authentication and membership.
+      x-implementation-status: planned-stage-6
+      responses:
+        "200":
+          description: File bytes
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+        "401":
+          $ref: "#/components/responses/ProblemResponse"
+        "404":
+          $ref: "#/components/responses/ProblemResponse"
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: opaque
+  parameters:
+    WorkspaceID:
+      name: workspaceId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    UserID:
+      name: userId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    FileID:
+      name: fileId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    SessionID:
+      name: sessionId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    LinkID:
+      name: linkId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    LinkToken:
+      name: token
+      in: path
+      required: true
+      schema:
+        type: string
+        minLength: 32
+    VersionNumber:
+      name: version
+      in: query
+      required: false
+      schema:
+        type: integer
+        minimum: 1
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      schema:
+        type: string
+        minLength: 16
+        maxLength: 128
+  responses:
+    HealthResponse:
+      description: Process health
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Health"
+    ProblemResponse:
+      description: Request failed
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/Problem"
+  schemas:
+    Health:
+      type: object
+      required: [status]
+      properties:
+        status:
+          type: string
+          enum: [live, ready]
+    Problem:
+      type: object
+      required: [type, title, status, code]
+      properties:
+        type:
+          type: string
+          format: uri
+        title:
+          type: string
+        status:
+          type: integer
+          minimum: 400
+          maximum: 599
+        detail:
+          type: string
+        instance:
+          type: string
+        code:
+          type: string
+          pattern: "^[a-z][a-z0-9_]*$"
+    RegisterRequest:
+      type: object
+      required: [name, email, password]
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 200
+        email:
+          type: string
+          format: email
+        password:
+          type: string
+          format: password
+          minLength: 12
+          writeOnly: true
+    LoginRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email:
+          type: string
+          format: email
+        password:
+          type: string
+          format: password
+          writeOnly: true
+    AuthResult:
+      type: object
+      required: [token, user]
+      properties:
+        token:
+          type: string
+          writeOnly: true
+        user:
+          $ref: "#/components/schemas/User"
+    User:
+      type: object
+      required: [id, name, email, is_superadmin, created_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        email:
+          type: string
+          format: email
+        is_superadmin:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+    CreateWorkspaceRequest:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 200
+    Workspace:
+      type: object
+      required: [id, name, kind, created_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        kind:
+          type: string
+          enum: [base, private]
+        created_at:
+          type: string
+          format: date-time
+    MemberRoleRequest:
+      type: object
+      required: [role]
+      properties:
+        role:
+          $ref: "#/components/schemas/WorkspaceRole"
+    WorkspaceMember:
+      type: object
+      required: [workspace_id, user, role]
+      properties:
+        workspace_id:
+          type: string
+          format: uuid
+        user:
+          $ref: "#/components/schemas/User"
+        role:
+          $ref: "#/components/schemas/WorkspaceRole"
+    WorkspaceRole:
+      type: string
+      enum: [owner, editor, viewer]
+    File:
+      type: object
+      required: [id, workspace_id, name, text_encoding, current_version, created_by, created_at, updated_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        workspace_id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        text_encoding:
+          type: string
+          example: utf-8
+        current_version:
+          $ref: "#/components/schemas/FileVersion"
+        created_by:
+          type: string
+          format: uuid
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    FileVersion:
+      type: object
+      required: [id, file_id, version_number, size, sha256, mime_type, original_name, created_by, created_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        file_id:
+          type: string
+          format: uuid
+        version_number:
+          type: integer
+          minimum: 1
+        size:
+          type: integer
+          minimum: 0
+        sha256:
+          type: string
+          pattern: "^[a-f0-9]{64}$"
+        mime_type:
+          type: string
+        original_name:
+          type: string
+        created_by:
+          type: string
+          format: uuid
+        created_at:
+          type: string
+          format: date-time
+    EncodingRequest:
+      type: object
+      required: [text_encoding]
+      properties:
+        text_encoding:
+          type: string
+          minLength: 1
+          example: windows-1251
+    UpdateSession:
+      type: object
+      required: [id, file_id, base_version_id, status, expires_at, created_by, created_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        file_id:
+          type: string
+          format: uuid
+        base_version_id:
+          type: string
+          format: uuid
+        resolved_version_id:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [active, resolved, rejected, expired]
+        expires_at:
+          type: string
+          format: date-time
+        created_by:
+          type: string
+          format: uuid
+        created_at:
+          type: string
+          format: date-time
+        completed_at:
+          type: string
+          format: date-time
+    DiffResult:
+      type: object
+      required: [kind, base_sha256, candidate_sha256, rollback_warning]
+      properties:
+        kind:
+          type: string
+          enum: [text, binary_or_too_large]
+        unified_diff:
+          type: string
+        base_sha256:
+          type: string
+        candidate_sha256:
+          type: string
+        rollback_warning:
+          type: boolean
+    FileLock:
+      type: object
+      required: [id, file_id, status, locked_by, created_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        file_id:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [active, released]
+        locked_by:
+          type: string
+          format: uuid
+        created_at:
+          type: string
+          format: date-time
+        released_at:
+          type: string
+          format: date-time
+        released_by:
+          type: string
+          format: uuid
+    FileLink:
+      type: object
+      required: [id, file_id, kind, token, status, created_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        file_id:
+          type: string
+          format: uuid
+        version_id:
+          type: string
+          format: uuid
+        kind:
+          type: string
+          enum: [current, version]
+        token:
+          type: string
+        status:
+          type: string
+          enum: [active, revoked]
+        created_at:
+          type: string
+          format: date-time
+        revoked_at:
+          type: string
+          format: date-time
