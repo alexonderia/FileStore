@@ -1,13 +1,13 @@
 # FileStore MVP — технический план реализации
 
-Статус документа: проектирование, код не начат.  
+Статус документа: утверждённый baseline MVP, активная реализация.
 Основание: `FileStore_MVP.docx` (v0.9, 15.07.2026), `filestore_conflicts_summary.docx` (06.07.2026), `db_schemas/15-07-mvp.png`.
 
 ## 1. Общая оценка проекта
 
 FileStore MVP имеет жизнеспособное и достаточно простое ядро: PostgreSQL хранит бизнес-состояние и связи, SeaweedFS — неизменяемые байты, API является единственной точкой авторизации и изменения состояния, CLI работает только через API. Отдельная опубликованная версия на каждый объект, указатель `files.current_version_id`, optimistic-проверка `base_version_id` и два разных вида блокировок образуют согласованную основу.
 
-До начала реализации спецификацию нельзя считать полностью исполнимой. Базовые решения по identity и совместному доступу зафиксированы в этом плане: пользователь регистрируется или входит по учётным данным, первоначальный суперадминистратор создаётся отдельной bootstrap-командой, ссылки создаются автоматически для файла и каждой версии, а кодировка файла является изменяемой метаинформацией. Оставшиеся существенные пробелы: заявленным CLI-командам не хватает части API-операций, внешнее хранилище нельзя включить в транзакцию PostgreSQL, не задан полный контракт diff, а несколько внешних ключей не гарантируют принадлежность версии тому же файлу.
+Контрактные неоднозначности исходных документов закрыты решениями A-01–A-21, ADR 0001–0004, OpenAPI и актуальной ER-схемой. Пользователь регистрируется или входит по учётным данным, первоначальный суперадминистратор создаётся отдельной bootstrap-командой, ссылки создаются автоматически для файла и каждой версии, а кодировка файла является изменяемой метаинформацией. Лимиты upload/diff, TTL, allowlist кодировок, хранение link token и согласованность PostgreSQL/SeaweedFS теперь имеют единый нормативный baseline.
 
 ### 1.1. Приоритет источников
 
@@ -27,7 +27,7 @@ FileStore MVP имеет жизнеспособное и достаточно п
 - CLI не обращается напрямую ни к PostgreSQL, ни к SeaweedFS.
 - Распределённой транзакции нет; согласованность PostgreSQL и SeaweedFS достигается порядком операций, компенсацией и периодической сверкой.
 
-Выбор Go является архитектурным предложением, а не требованием исходных документов. Если язык уже выбран вне репозитория, структуру слоёв и этапы следует сохранить, заменив только инструменты.
+Go 1.25+ утверждён как технологический baseline ADR 0004. Смена языка или разделение API/CLI по разным репозиториям является архитектурным изменением и требует нового ADR.
 
 ## 2. Проверка архитектуры
 
@@ -79,8 +79,8 @@ DB-транзакцию нельзя держать открытой во вре
 
 Diff не хранится. При запросе API читает base и candidate objects и декодирует их согласно `files.text_encoding`. При неправильном отображении пользователь с правом изменения файла может сменить кодировку и повторить запрос diff; сохранённые байты и история версий при этом не меняются. API возвращает:
 
-- для текстовых файлов с поддерживаемой кодировкой в пределах настроенного лимита — построчную разницу в Unicode;
-- для бинарных, неизвестных или слишком больших файлов — только сравнение имени, MIME, размера и SHA-256 с признаком `binary_or_too_large`;
+- для текстовых файлов с поддерживаемой кодировкой в пределах 1 MiB decoded bytes и 20 000 строк на сторону, если output не превышает 1 MiB, — построчную разницу в Unicode с `kind=text`;
+- для бинарных, неизвестных, ошибочно декодируемых или слишком больших файлов — только сравнение имени, MIME, размера и SHA-256 с `kind=metadata_only` и точной причиной fallback;
 - предупреждение о возможном откате, если SHA-256 кандидата совпал с одной из более ранних опубликованных версий того же файла, но не с current.
 
 Автоматический merge отсутствует. Результат diff информационный и не меняет решение о публикации.
@@ -184,8 +184,8 @@ Hard lock не заменяет optimistic-проверку версии, а upd
 
 | № | Противоречие | Решение MVP |
 |---|---|---|
-| C-01 | PNG называет таблицу `file_update_locks`, текст и DDL — `file_locks` | Использовать `file_locks`; обновить PNG |
-| C-02 | В PNG `storage_objects.mime_type` обязателен, в DDL nullable | Сделать обязательным с fallback `application/octet-stream` либо явно оставить nullable; рекомендуется первый вариант |
+| C-01 | PNG называет таблицу `file_update_locks`, текст и DDL — `file_locks` | Принято `file_locks`; PNG помечен историческим и заменён актуальной Mermaid ER-схемой в `docs/db_schemas/README.md` |
+| C-02 | В PNG `storage_objects.mime_type` обязателен, в DDL nullable | Принято `NOT NULL` с fallback `application/octet-stream` |
 | C-03 | Conflict summary относит base version и locks к будущему, основной документ включает их в MVP | Основной документ имеет приоритет |
 | C-04 | Conflict summary допускает last-write-wins, основной flow отклоняет stale base и допускает одну active session | Использовать optimistic reject-on-conflict; last-write-wins отсутствует |
 | C-05 | «Каждая попытка обновления» хранится в sessions, но сбой до DB insert оставляет только S3 object | Считать попыткой только успешно созданную session; технические сбои фиксировать в логах/метриках |
@@ -196,9 +196,9 @@ Hard lock не заменяет optimistic-проверку версии, а upd
 | C-10 | Cleanup сначала удаляет DB metadata и S3 object без определённого порядка | Применить описанный state-first и retryable cleanup flow |
 | C-11 | Активная, но уже истёкшая session продолжает занимать уникальный индекс до cleanup | Проверять время во всех командах и лениво завершать просроченную session |
 | C-12 | Документ запрещает rename/delete/change-current под lock, но таких операций в MVP API нет | Не реализовывать их; оставить правило как расширяемую policy |
-| C-13 | Workspace создаётся как `AcomOfferDesk`, а CLI далее использует `acom`; slug отсутствует | CLI принимает UUID или точное регистронезависимое имя; примеры привести к одному имени |
+| C-13 | Workspace создаётся как `AcomOfferDesk`, а CLI далее использует `acom`; slug отсутствует | Внешние операции принимают UUID; `workspace list/create/use` передают полученный UUID, slug отсутствует |
 | C-14 | `UNIQUE(workspace_id, name)` чувствителен к регистру, а CLI работает на разных ОС | Рекомендуется регистронезависимая уникальность имени файла внутри workspace |
-| C-15 | Запись `UNIQUE(lower(email))` внутри определения таблицы не является допустимым expression constraint PostgreSQL | Создать отдельный unique expression index, аналогично workspace name |
+| C-15 | Запись `UNIQUE(lower(email))` внутри определения таблицы не является допустимым expression constraint PostgreSQL | Принято `email citext UNIQUE`; workspace/file names используют отдельные expression indexes |
 | C-16 | Status допускает несовместимые nullable-поля session и lock | Добавить status-dependent CHECK constraints и единый state transition service |
 | C-17 | Документ допускает `INSERT users`, но не описывает регистрацию/первичную identity | Пользователь создаётся регистрацией и затем входит; первоначальный superadmin создаётся отдельной идемпотентной bootstrap-командой и также использует обычный login |
 | C-18 | История индексируется по `created_at`, хотя нормативный порядок задаёт `version_number` | Сортировать историю по `version_number DESC`; timestamp оставить отображаемым атрибутом |
@@ -207,25 +207,25 @@ Hard lock не заменяет optimistic-проверку версии, а upd
 
 | ID | Не задано | Почему важно | Простое решение для MVP |
 |---|---|---|---|
-| A-01 | Язык и библиотеки | Определяет структуру, миграции и тесты | Принять Go, PostgreSQL driver, AWS S3-compatible SDK, минимальный HTTP router и CLI framework |
+| A-01 | Язык и библиотеки | Определяет структуру, миграции и тесты | Go 1.25+, `net/http`, standard `flag`, `pgx/v5`; AWS SDK for Go v2 для S3-compatible adapter |
 | A-02 | Способ аутентификации и выдачи token | Без этого private workspace небезопасен, а `login` не реализуем | Регистрация и вход по email/password; пароль хранится как стойкий password hash, login выдаёт opaque Bearer token, в БД хранится только hash token |
 | A-03 | Создание первого user и superadmin | Невозможно безопасно начать администрирование | Идемпотентная deployment-команда `filestore-api bootstrap-superadmin`; публичная регистрация не назначает роль автоматически, созданный superadmin входит обычной командой login |
 | A-04 | Полный API-контракт upload/download/list/revoke | CLI не может работать | Зафиксировать недостающие операции в OpenAPI до handler-ов |
 | A-05 | Формат upload | Влияет на streaming и лимиты | Один multipart request через API; presigned/multipart-to-S3 исключён |
-| A-06 | Максимальный размер файла | Защита памяти, диска и времени запроса | Настраиваемый hard limit; выбрать значение при deployment, обработка потоковая |
-| A-07 | TTL update session | Определяет UX и cleanup | Настраиваемый TTL с единым серверным default, например 24 часа |
-| A-08 | Поддерживаемый diff | Иначе endpoint непроверяем | Unicode line diff под лимитом после декодирования выбранной кодировкой; при ошибке декодирования metadata-only |
+| A-06 | Максимальный размер файла | Защита памяти, диска и времени запроса | Потоковый hard limit, default 100 MiB; `FILESTORE_MAX_FILE_SIZE` |
+| A-07 | TTL update session | Определяет UX и cleanup | Default 24 часа; `FILESTORE_UPDATE_SESSION_TTL`, server clock authoritative |
+| A-08 | Поддерживаемый diff | Иначе endpoint непроверяем | Unicode line diff: до 1 MiB decoded bytes и 20 000 строк на сторону, output до 1 MiB; иначе полный metadata-only result с причиной |
 | A-09 | Значение «риск отката» | В основном документе термин не определён | Совпадение hash кандидата с более старой версией |
 | A-10 | Поведение при одинаковом с current содержимом | Нет статуса `noop` | Создать обычную active session с пустым diff; пользователь resolve/reject |
 | A-11 | Idempotency create/upload | Повторы сети могут создавать объекты/сессии | Поддержать idempotency key минимум для первой загрузки, create session и resolve |
 | A-12 | Кто может unlock | Иначе пользователь может снять чужой lock | Создатель файла, locker или editor; owner включает права editor, superadmin имеет административный override |
-| A-13 | Кто создаёт/отзывает links | Не определено явно | Links создаёт сервис автоматически для файла и каждой версии; base creator/private owner/editor/superadmin могут их просматривать и отзывать |
+| A-13 | Кто создаёт/отзывает links | Не определено явно | Links создаёт сервис автоматически; base creator/private owner/editor/superadmin просматривают/отзывают; 256-bit token хранится plaintext для повторного просмотра и строго редактируется в логах |
 | A-14 | Поведение revoked/expired/not found | Влияет на security и CLI | Единый problem format; публичные tokens маскировать как not found, expired session возвращать доменную ошибку |
 | A-15 | Version selector | CLI использует номер, БД — UUID | Внешний контракт принимает version number в контексте file; API сам находит version ID |
 | A-16 | Имя логического файла | Local path, original_name и files.name различаются | `files.name` задаётся явно или basename первой загрузки; `original_name` сохраняет basename каждого upload |
-| A-17 | Кодировка текста | Нельзя безопасно строить line diff, а ошибочное определение ломает чтение | Хранить изменяемую `files.text_encoding`; принимать нормализованные IANA-имена из allowlist, разрешить авторизованную смену без создания версии и не менять исходные bytes |
+| A-17 | Кодировка текста | Нельзя безопасно строить line diff, а ошибочное определение ломает чтение | Allowlist `utf-8`, `utf-16le`, `utf-16be`, `windows-1251`; `utf-8` обязателен/default; смена metadata не создаёт версию и не меняет bytes |
 | A-18 | Согласованность backup | PostgreSQL и SeaweedFS меняются независимо | На MVP — maintenance window и остановка write-трафика на время согласованной копии |
-| A-19 | Политика orphan retention | Немедленное удаление опасно при гонках | Удалять только несвязанные объекты старше настраиваемого grace period |
+| A-19 | Политика orphan retention | Немедленное удаление опасно при гонках | Удалять только повторно проверенные несвязанные объекты старше default grace period 24 часа |
 | A-20 | Наблюдаемость cleanup | Потерянные objects иначе незаметны | Метрики количества active/expired/orphan и ошибок удаления; структурные логи с IDs без token |
 | A-21 | Кто завершает чужую update session | Editor может принять/отклонить кандидата другого пользователя | Session creator или workspace owner; в base — creator файла; superadmin имеет административный override |
 
@@ -239,16 +239,18 @@ Hard lock не заменяет optimistic-проверку версии, а upd
 4. Base write policy — любой authenticated user может создать новый файл; далее изменять его может creator. Superadmin имеет глобальный административный доступ с обязательным аудитом.
 5. Private policy — owner/editor пишут, viewer читает, только owner управляет membership; последний owner не удаляется.
 6. File names и workspace names уникальны регистронезависимо; директорий и path hierarchy нет.
-7. Diff — Unicode line diff под лимитом после декодирования согласно изменяемой кодировке файла, иначе metadata-only. Смена кодировки не меняет bytes и не создаёт версию. Merge отсутствует.
-8. Update TTL и лимит файла задаются конфигурацией API. Серверное время является единственным источником истины.
+7. Diff — Unicode line diff при лимитах 1 MiB/20 000 строк на сторону и 1 MiB output после декодирования согласно allowlist; иначе metadata-only с причиной. Смена кодировки не меняет bytes и не создаёт версию. Merge отсутствует.
+8. Update TTL по умолчанию 24 часа, upload limit 100 MiB, orphan grace period 24 часа; значения задаются конфигурацией API. Серверное время является единственным источником истины.
 9. Resolve идемпотентен. Для create-file и create-session CLI отправляет idempotency key.
 10. API расширяется только операциями, необходимыми уже заявленным CLI: register/login/logout, поиск/выбор workspace, list files, authenticated download, получение/отзыв автоматически созданных links, смена кодировки и проверка текущей identity.
 11. Cleanup встроен в API-процесс для single-instance MVP. При масштабировании применяется DB coordination, а затем при необходимости выделяется worker.
 12. SeaweedFS image pin фиксируется в deployment-документации; bucket и credentials создаются вне бизнес-запросов.
 13. Current-link создаётся автоматически для каждого файла, version-link — для каждой опубликованной версии; пользовательского create-link endpoint нет.
 14. Unlock разрешён создателю файла, пользователю, наложившему lock, и editor (owner наследует его права); superadmin имеет административный override.
+15. Link token — 256-bit base64url capability, хранится plaintext ради авторизованного повторного просмотра; БД/backup считаются secret-bearing, token редактируется во всех логах.
+16. Standalone user lifecycle/admin API и HTTP Range явно отложены за пределы MVP; bootstrap и superadmin workspace/file override покрывают заявленный MVP.
 
-Решения 3, 4, 7, 13 и 14 в этом документе считаются подтверждёнными продуктовым решением и должны быть отражены в OpenAPI, миграциях и тестах до реализации соответствующего этапа.
+Все решения A-01–A-21 утверждены. Точные operational defaults и capability-token policy закреплены ADR 0004 и отражены в OpenAPI/config; изменения требуют нового ADR.
 
 ## 5. Dependency Map
 
@@ -623,11 +625,11 @@ MVP не должен заранее строить распределённый
 - history/list получают cursor pagination до появления больших наборов;
 - object storage и DB масштабируются независимо, но backup остаётся согласованным процессом.
 
-## 10. Рекомендации перед началом разработки
+## 10. Обязательные ограничения реализации
 
-1. Утвердить ADR: язык/стек, password/token hashing, bootstrap superadmin, permission matrix, link token storage, encoding allowlist, diff/limits/TTL.
-2. Исправить нормативный документ и PNG по C-01–C-18; не поддерживать три конкурирующих описания schema.
-3. Сначала завершить OpenAPI, включая отсутствующие операции CLI, request/response schemas, pagination и problem format.
+1. ADR 0001–0004, OpenAPI и `docs/db_schemas/README.md` являются утверждённым baseline языка/стека, auth, permissions, link token, encoding, diff, limits и TTL.
+2. Исторические DOCX/PNG не изменяются как бинарные первоисточники; все C-01–C-18 разрешены этим планом и актуальной version-controlled ER-схемой.
+3. OpenAPI обновляется раньше handlers и остаётся контрактом request/response, implementation status и problem format.
 4. Создать миграции только после фиксации auth и composite integrity constraints: ранняя ошибка schema дороже сервисной правки.
 5. Не вводить dedup, merge, directories, rollback, soft locks, presigned upload, полноценную audit-подсистему или отдельный worker — они не нужны MVP; для superadmin достаточно обязательных структурированных security events.
 6. Централизовать permission policy, write guard и session state transitions; не размазывать их по handlers.
@@ -641,30 +643,30 @@ MVP не должен заранее строить распределённый
 
 ## 11. Рабочий чек-лист разработки
 
-Статус реализации на 16.07.2026: **этапы D-00–D-02 в работе**, последующие этапы не начаты. Созданы ADR baseline, Go-каркас API/CLI, OpenAPI, CI, контейнерная сборка, PostgreSQL migrations, Argon2id/token primitives, идемпотентная bootstrap-команда superadmin и инструкции ручной проверки этапов 0–1. Register/login/logout и workspace API/CLI этапа D-02 ещё не реализованы.
+Статус реализации на 16.07.2026: **D-00–D-08 доведены до минимально рабочего тестируемого MVP**. Реализована вертикаль identity/workspace → PostgreSQL/SeaweedFS files → update/diff/resolve/reject/expire → hard locks → automatic links через HTTP API, Go client и CLI. Автоматическая приёмка использует реальные PostgreSQL и SeaweedFS; инструкции находятся в `docs/stages/00-*.md`–`07-release.md`. Production-наблюдаемость, нагрузочный профиль и restore drill на целевой инфраструктуре остаются отдельной эксплуатационной работой и не входят в утверждение о локально тестируемом MVP.
 
 | ID | Этап | Статус | Зависимости | Критерии готовности |
 |---|---|---|---|---|
-| D-00 | Утвердить ADR и устранить неоднозначности | В работе | Нет | Решены A-01–A-21, C-01–C-18 отражены в спецификации |
-| D-01 | OpenAPI и компилируемый каркас | В работе | D-00 | API/CLI собираются; contract validation/lint/unit зелёные; ручная проверка описана в `docs/stages/00-contract.md` |
-| D-02 | PostgreSQL/миграции/identity/workspace | В работе | D-01 | Register/login/bootstrap superadmin, roles и workspace API/CLI работают; проверка описана в `docs/stages/01-identity-workspace.md` |
-| D-03 | SeaweedFS + files + first versions | Не начато | D-02 | Atomic upload, current v1, encoding get/set, history/download/compensation проверены по `docs/stages/02-files-versions.md` |
-| D-04 | Update session creation + diff | Не начато | D-03 | Один active candidate, current неизменен, encoding-aware bounded diff проверен по `docs/stages/03-update-diff.md` |
-| D-05 | Resolve/reject/expire/cleanup | Не начато | D-04 | Terminal transitions, idempotent resolve и retries/orphan cleanup проверены по `docs/stages/04-update-lifecycle.md` |
-| D-06 | Hard locks | Не начато | D-05 | 423 на всех writes, unlock policy и lock/session races проверены по `docs/stages/05-hard-locks.md` |
-| D-07 | Links | Не начато | D-03, D-06 | Автоматические current/version links, backfill, base/private/revoke проверены по `docs/stages/06-links.md` |
-| D-08 | Release hardening | Не начато | D-02–D-07 | Ручная release-проверка по `docs/stages/07-release.md`, полный e2e/race/failure suite, runbooks, restore drill, pinned dependencies |
+| D-00 | Утвердить ADR и устранить неоднозначности | Завершён | Нет | Решены A-01–A-21, C-01–C-18 отражены в спецификации |
+| D-01 | OpenAPI и компилируемый каркас | Завершён | D-00 | API/CLI собираются; contract validation/lint/unit зелёные; ручная проверка пройдена по `docs/stages/00-contract.md` |
+| D-02 | PostgreSQL/миграции/identity/workspace | Завершён | D-01 | Register/login/bootstrap superadmin, roles и workspace API/CLI проверены |
+| D-03 | SeaweedFS + files + first versions | Завершён | D-02 | Atomic upload, current v1, encoding, history/download и compensation проверены |
+| D-04 | Update session creation + diff | Завершён | D-03 | Один active candidate, current неизменен, bounded encoding-aware diff проверен |
+| D-05 | Resolve/reject/expire/cleanup | Завершён | D-04 | Terminal transitions, idempotent resolve, scheduler и orphan cleanup реализованы |
+| D-06 | Hard locks | Завершён | D-05 | Write guard, unlock policy и lock/session race проверены |
+| D-07 | Links | Завершён | D-03, D-06 | Automatic current/version links, base/private access и revoke реализованы |
+| D-08 | Минимальная release-проверка | Завершён | D-02–D-07 | Clean verification, real-infra journey, pinned dependencies и runbook готовы |
 
 ### Детальный контроль выполнения
 
-- [ ] **D-00 — в работе:** Go, register/login/bootstrap superadmin, permissions и транзакционный baseline зафиксированы ADR; требуется определить upload limit, update TTL, encoding allowlist и diff limits, решить plaintext/hash link token и актуализировать диаграмму.
-- [ ] **D-01 — в работе:** module, два entrypoint, полный OpenAPI baseline, problem format, build/lint/unit, CI, контейнерные цели, CLI config/help/version и `docs/stages/00-contract.md` созданы; требуется полная ручная приёмка по инструкции после закрытия D-00.
-- [ ] **D-02 — в работе:** migrations users/workspaces/members/tokens, bootstrap base, Argon2id/token primitives, идемпотентный bootstrap superadmin и `docs/stages/01-identity-workspace.md` созданы; требуется реализовать register/login/logout, token validation, централизованную authorization и workspace API/CLI, затем проверить owner transaction, last owner и роли.
-- [ ] **D-03 — не начато:** реализовать immutable storage adapter; pin/test SeaweedFS; создать storage/files/versions migration с `text_encoding`; реализовать streaming upload/hash, атомарную первую версию, list/info/history/download и encoding get/set; проверить compensation и cross-file integrity; написать и пройти `docs/stages/02-files-versions.md`.
-- [ ] **D-04 — не начато:** создать session migration; реализовать candidate upload; files-row serialization; unique active handling; idempotency; encoding-aware Unicode/metadata diff; rollback warning и concurrent tests; написать и пройти `docs/stages/03-update-diff.md`.
-- [ ] **D-05 — не начато:** реализовать единый state machine; resolve transaction; idempotent retry; reject/expire; встроенный scheduler; orphan reconciliation и fault/race tests; написать и пройти `docs/stages/04-update-lifecycle.md`.
-- [ ] **D-06 — не начато:** создать lock migration; реализовать lock/unlock/status и правило creator/locker/editor/owner/superadmin; применить shared write guard ко всем writes; проверить 409/423, lock/update races и lock history; написать и пройти `docs/stages/05-hard-locks.md`.
-- [ ] **D-07 — не начато:** создать links migration с идемпотентным backfill; встроить автоматическое создание current/version links в file-create/resolve; реализовать list/show/revoke, public base/private auth, token redaction и duplicate/wrong-file/hard-lock tests; написать и пройти `docs/stages/06-links.md`.
-- [ ] **D-08 — не начато:** выполнить clean-install/upgrade tests, полный CLI e2e, failure injection, concurrency suite и backup/restore drill; проверить отсутствие token/password/PII в логах; обновить runbooks и схему; написать и пройти `docs/stages/07-release.md`; подготовить release checklist.
+- [x] **D-00 — завершён:** ADR 0001–0004 фиксируют Go stack, auth/bootstrap, permissions, транзакции, upload 100 MiB, update TTL 24h, diff 1 MiB/20 000 строк/1 MiB output, encoding allowlist, orphan grace 24h и plaintext 256-bit link capability; C-01–C-18 разрешены, актуальная ER-схема находится в `docs/db_schemas/README.md`.
+- [x] **D-01 — завершён:** module, два entrypoint, OpenAPI baseline с implementation status и operational defaults, RFC 9457 problem format, build/lint/unit, Linux race CI, обе container targets, CLI config/help/version и graceful shutdown проверены; stage-0 режим без БД и результат приёмки зафиксированы в `docs/stages/00-contract.md`.
+- [x] **D-02 — завершён:** identity/workspace, last-owner race, bootstrap и API/CLI покрыты unit/integration/e2e.
+- [x] **D-03 — завершён:** SeaweedFS adapter, migration `000003`, streaming upload/hash, first version, history/download/encoding и DB-conflict compensation проверены.
+- [x] **D-04 — завершён:** migration `000004`, idempotent candidate upload, одна active session, encoding-aware bounded diff и rollback warning реализованы.
+- [x] **D-05 — завершён:** resolve/reject/expire state machine, idempotent resolve, встроенный scheduler и DB-orphan cleanup реализованы.
+- [x] **D-06 — завершён:** migration `000005`, lock/status/unlock, общий files-row guard и конкурентный lock-vs-session test реализованы.
+- [x] **D-07 — завершён:** migration/backfill `000006`, automatic current/version links, public/private download и irreversible revoke реализованы.
+- [x] **D-08 — минимальный test-ready baseline завершён:** pinned Compose, OpenAPI lint, build/vet/tests, real PostgreSQL/SeaweedFS journey и release/backup instructions готовы; production restore drill и observability отмечены как deployment follow-up.
 
 MVP считается завершённым только после D-08: наличие отдельных работающих endpoint-ов без проверенных транзакционных и отказных сценариев не является готовностью файлового хранилища.

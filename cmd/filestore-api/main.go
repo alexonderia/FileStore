@@ -10,6 +10,9 @@ import (
 	"github.com/alexonderia/filestore/internal/app"
 	"github.com/alexonderia/filestore/internal/config"
 	"github.com/alexonderia/filestore/internal/database"
+	"github.com/alexonderia/filestore/internal/storage"
+	"github.com/alexonderia/filestore/internal/storage/seaweedfs"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 var version = "dev"
@@ -31,8 +34,10 @@ func main() {
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	var pool *pgxpool.Pool
+	var objectStore storage.ObjectStore
 	if cfg.DatabaseURL != "" {
-		pool, err := database.Open(ctx, cfg.DatabaseURL)
+		pool, err = database.Open(ctx, cfg.DatabaseURL)
 		if err != nil {
 			logger.Error("database startup failed", "error", err)
 			os.Exit(1)
@@ -46,9 +51,23 @@ func main() {
 	} else {
 		logger.Warn("database is not configured; product endpoints are unavailable")
 	}
+	if cfg.StorageConfigured() {
+		store, err := seaweedfs.New(ctx, cfg)
+		if err != nil {
+			logger.Error("object storage startup failed", "error", err)
+			os.Exit(1)
+		}
+		if err := store.EnsureBucket(ctx); err != nil {
+			logger.Error("object storage bucket failed", "error", err)
+			os.Exit(1)
+		}
+		objectStore = store
+	} else if pool != nil {
+		logger.Warn("object storage is not configured; file endpoints are unavailable")
+	}
 
 	logger.Info("starting FileStore API", "version", version)
-	if err := app.NewAPI(cfg, logger).Run(ctx); err != nil {
+	if err := app.NewMVPAPI(cfg, logger, pool, objectStore).Run(ctx); err != nil {
 		logger.Error("API stopped with error", "error", err)
 		os.Exit(1)
 	}

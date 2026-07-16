@@ -9,6 +9,8 @@ func TestLoadAPIPrecedence(t *testing.T) {
 	environment := map[string]string{
 		"FILESTORE_API_LISTEN":              ":9000",
 		"FILESTORE_API_READ_HEADER_TIMEOUT": "7s",
+		"FILESTORE_MAX_FILE_SIZE":           "2048",
+		"FILESTORE_TEXT_ENCODINGS":          "utf-8,windows-1251,utf-8",
 	}
 	getenv := func(name string) string { return environment[name] }
 
@@ -22,6 +24,12 @@ func TestLoadAPIPrecedence(t *testing.T) {
 	if cfg.ReadHeaderTimeout != 7*time.Second {
 		t.Fatalf("ReadHeaderTimeout = %s, want 7s", cfg.ReadHeaderTimeout)
 	}
+	if cfg.MaxFileSize != 2048 {
+		t.Fatalf("MaxFileSize = %d, want 2048", cfg.MaxFileSize)
+	}
+	if len(cfg.TextEncodings) != 2 || cfg.TextEncodings[0] != "utf-8" || cfg.TextEncodings[1] != "windows-1251" {
+		t.Fatalf("TextEncodings = %v", cfg.TextEncodings)
+	}
 }
 
 func TestLoadAPIRejectsInvalidValues(t *testing.T) {
@@ -33,6 +41,10 @@ func TestLoadAPIRejectsInvalidValues(t *testing.T) {
 		{name: "empty listen", args: []string{"--listen="}},
 		{name: "zero timeout", args: []string{"--shutdown-timeout=0s"}},
 		{name: "invalid environment duration", env: map[string]string{"FILESTORE_API_SHUTDOWN_TIMEOUT": "later"}},
+		{name: "invalid size", env: map[string]string{"FILESTORE_MAX_FILE_SIZE": "large"}},
+		{name: "zero diff lines", args: []string{"--diff-max-lines=0"}},
+		{name: "unsupported encoding", args: []string{"--text-encodings=utf-8,koi8-r"}},
+		{name: "missing utf8", args: []string{"--text-encodings=windows-1251"}},
 		{name: "positional argument", args: []string{"unexpected"}},
 	}
 

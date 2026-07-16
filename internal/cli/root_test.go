@@ -2,9 +2,13 @@ package cli
 
 import (
 	"bytes"
+	"net/http"
+	"net/http/httptest"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/alexonderia/filestore/internal/config"
 )
 
 func TestHelpAndVersion(t *testing.T) {
@@ -24,6 +28,40 @@ func TestHelpAndVersion(t *testing.T) {
 		if !strings.Contains(stdout.String(), test.want) {
 			t.Fatalf("Run(%v) output = %q, want substring %q", test.args, stdout.String(), test.want)
 		}
+	}
+}
+
+func TestLoginStoresButDoesNotPrintToken(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if request.URL.Path != "/auth/login" {
+			http.NotFound(writer, request)
+			return
+		}
+		writer.Header().Set("Content-Type", "application/json")
+		_, _ = writer.Write([]byte(`{"token":"raw-secret-token","user":{"id":"00000000-0000-4000-8000-000000000002","name":"User","email":"user@example.test","is_superadmin":false,"created_at":"2026-07-16T00:00:00Z"}}`))
+	}))
+	defer server.Close()
+	configPath := filepath.Join(t.TempDir(), "config.json")
+	if err := config.SaveClient(configPath, config.Client{APIURL: server.URL}); err != nil {
+		t.Fatal(err)
+	}
+	getenv := func(name string) string {
+		if name == "FILESTORE_CONFIG" {
+			return configPath
+		}
+		return ""
+	}
+	var stdout, stderr bytes.Buffer
+	code := RunWithInput([]string{"login", "--email", "user@example.test", "--password-stdin"}, strings.NewReader("correct horse battery staple\n"), &stdout, &stderr, getenv, "test")
+	if code != 0 {
+		t.Fatalf("login code = %d, stderr = %q", code, stderr.String())
+	}
+	if strings.Contains(stdout.String(), "raw-secret-token") {
+		t.Fatal("raw token was printed")
+	}
+	cfg, err := config.LoadClient(configPath)
+	if err != nil || cfg.Token != "raw-secret-token" {
+		t.Fatalf("stored token = %q, error = %v", cfg.Token, err)
 	}
 }
 

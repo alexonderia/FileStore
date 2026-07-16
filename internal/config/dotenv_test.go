@@ -49,3 +49,25 @@ func TestLoadDotEnvRejectsInvalidLine(t *testing.T) {
 		t.Fatal("LoadDotEnv() error = nil, want error")
 	}
 }
+
+func TestDotEnvThenEnvironmentThenFlagsPrecedence(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, ".env")
+	if err := os.WriteFile(path, []byte("FILESTORE_API_LISTEN=:9000\nFILESTORE_MAX_FILE_SIZE=1024\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("FILESTORE_API_LISTEN", ":8000")
+	if err := os.Unsetenv("FILESTORE_MAX_FILE_SIZE"); err != nil {
+		t.Fatal(err)
+	}
+	if err := LoadDotEnv(path); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := LoadAPI([]string{"--listen=:7000"}, os.Getenv)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.ListenAddress != ":7000" || cfg.MaxFileSize != 1024 {
+		t.Fatalf("listen = %q, max size = %d", cfg.ListenAddress, cfg.MaxFileSize)
+	}
+}

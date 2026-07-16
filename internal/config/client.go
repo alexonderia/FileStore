@@ -15,6 +15,7 @@ const defaultAPIURL = "http://localhost:8080"
 type Client struct {
 	APIURL      string `json:"api_url"`
 	WorkspaceID string `json:"workspace_id,omitempty"`
+	Token       string `json:"token,omitempty"`
 }
 
 func DefaultClient() Client {

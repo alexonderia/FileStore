@@ -15,5 +15,36 @@ services:
     volumes:
       - filestore-postgres:/var/lib/postgresql/data
 
+  pgadmin:
+    image: dpage/pgadmin4:9.6
+    environment:
+      PGADMIN_DEFAULT_EMAIL: ${PGADMIN_DEFAULT_EMAIL:-admin@example.test}
+      PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_DEFAULT_PASSWORD:-admin-password-123}
+      PGADMIN_CONFIG_ENHANCED_COOKIE_PROTECTION: "True"
+      PGADMIN_CONFIG_LOGIN_BANNER: '"Local FileStore PostgreSQL admin"'
+    ports:
+      - "${PGADMIN_PORT:-5050}:80"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - filestore-pgadmin:/var/lib/pgadmin
+
+  seaweedfs:
+    image: chrislusf/seaweedfs:4.29
+    command: mini -dir=/data
+    environment:
+      AWS_ACCESS_KEY_ID: ${FILESTORE_S3_ACCESS_KEY:-filestore}
+      AWS_SECRET_ACCESS_KEY: ${FILESTORE_S3_SECRET_KEY:-filestore-local}
+      S3_BUCKET: ${FILESTORE_S3_BUCKET:-filestore}
+    ports:
+      - "${SEAWEED_S3_PORT:-8333}:8333"
+      - "${SEAWEED_MASTER_PORT:-9333}:9333"
+      - "${SEAWEED_FILER_PORT:-8888}:8888"
+    volumes:
+      - filestore-seaweed:/data
+
 volumes:
   filestore-postgres:
+  filestore-pgadmin:
+  filestore-seaweed:

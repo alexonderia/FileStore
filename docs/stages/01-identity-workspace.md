@@ -8,7 +8,7 @@
 
 - Успешно пройден `docs/stages/00-contract.md`.
 - Docker и Docker Compose.
-- Свободный порт PostgreSQL 5432 и API 8080.
+- Свободный порт PostgreSQL 5432 и API: либо default `8080`, либо тот же тестовый порт, на котором был завершён `docs/stages/00-contract.md` (например, `18081`).
 - Временные значения `<ADMIN_PASSWORD>`, `<USER_PASSWORD>` длиной не менее 12 символов; реальные secrets в документ не записываются.
 
 ## Запуск и автоматические тесты
@@ -16,17 +16,18 @@
 ```text
 docker compose up -d postgres
 go test -race ./...
+FILESTORE_TEST_DATABASE_URL=postgres://filestore:filestore-local@localhost:5432/filestore?sslmode=disable go test -count=1 ./tests/integration ./tests/e2e
 go run ./cmd/filestore-api
 ```
 
-Перед запуском API задать `FILESTORE_DATABASE_URL` по `.env.example`. Ожидается применение `000001` и `000002`, после чего повторный запуск не меняет количество migrations и base workspaces.
+Перед запуском API задать `FILESTORE_DATABASE_URL` по `.env.example`. Если вы продолжаете сценарий сразу после `docs/stages/00-contract.md` и API уже поднят на `:18081`, можно не перезапускать сервер, а использовать тот же адрес. Ожидается применение `000001` и `000002`, после чего повторный запуск не меняет количество migrations и base workspaces.
 
 ## Bootstrap superadmin
 
 1. Передать `<ADMIN_PASSWORD>` через stdin в локальную команду:
 
    ```text
-   echo "<ADMIN_PASSWORD>" | go run ./cmd/filestore-api bootstrap-superadmin --name "System Admin" --email admin@example.test --password-stdin
+   echo "admin-password-123" | go run ./cmd/filestore-api bootstrap-superadmin --name "System Admin" --email admin@example.test --password-stdin
    ```
 
 2. Повторить команду с тем же email.
@@ -35,7 +36,14 @@ go run ./cmd/filestore-api
 
 ## Регистрация и вход
 
-1. Зарегистрировать обычного пользователя через CLI и убедиться, что `is_superadmin=false` независимо от порядка регистрации.
+1. Зарегистрировать обычного пользователя через CLI и убедиться, что `is_superadmin=false` независимо от порядка регистрации:
+
+   ```text
+   go run ./cmd/filestore config set api-url http://localhost:8080
+   echo "<USER_PASSWORD>" | go run ./cmd/filestore register --name "Owner" --email owner@example.test --password-stdin
+   go run ./cmd/filestore auth me
+   ```
+   Если API продолжает слушать `:18081` после `docs/stages/00-contract.md`, вместо `http://localhost:8080` использовать `http://localhost:18081`.
 2. Повторная регистрация email в другом регистре должна вернуть conflict и не создать дубль.
 3. Войти правильным паролем; `auth me` должен вернуть того же user ID.
 4. Проверить отказ с неправильным паролем и отсутствие password/token в логах.
@@ -44,8 +52,8 @@ go run ./cmd/filestore-api
 ## Workspace и роли
 
 1. Получить зарезервированный `base`: он существует ровно один, не переименовывается и не удаляется.
-2. Обычным пользователем создать private workspace. Создатель должен стать owner в той же транзакции.
-3. Добавить editor и viewer, проверить чтение workspace каждым участником.
+2. Обычным пользователем создать private workspace командой `filestore workspace create <NAME>`. Создатель должен стать owner в той же транзакции.
+3. Добавить editor и viewer командой `filestore workspace member add <WORKSPACE_ID> <EMAIL> <ROLE>`, проверить чтение workspace каждым участником.
 4. Viewer не может изменять membership; editor также не управляет membership; owner может.
 5. Попытка удалить последнего owner возвращает conflict.
 6. Superadmin видит workspace без membership и может управлять пользователями/membership; событие фиксируется структурным security log.

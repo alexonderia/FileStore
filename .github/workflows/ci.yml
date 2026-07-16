@@ -19,11 +19,18 @@ jobs:
           cache: true
       - name: Check formatting
         shell: bash
-        run: test -z "$(gofmt -l .)"
+        run: test -z "$(gofmt -l $(find . -type f -name '*.go' -not -path './.git/*'))"
       - name: Vet
         run: go vet ./...
       - name: Test
         run: go test -race -coverprofile=coverage.out ./...
+      - name: Start integration dependencies
+        run: docker compose up -d --wait postgres seaweedfs
+      - name: Real PostgreSQL and SeaweedFS integration
+        env:
+          FILESTORE_TEST_DATABASE_URL: postgres://filestore:filestore-local@localhost:5432/filestore?sslmode=disable
+          FILESTORE_TEST_S3_ENDPOINT: http://localhost:8333
+        run: go test -count=1 ./tests/integration ./tests/e2e
       - name: Build
         run: go build ./cmd/filestore-api ./cmd/filestore
 

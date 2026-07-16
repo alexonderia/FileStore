@@ -5,6 +5,14 @@ info:
   description: |
     Contract for the FileStore MVP. Health operations are implemented in stage 0;
     product operations marked as planned are implemented in subsequent stages.
+x-filestore-defaults:
+  max_file_size_bytes: 104857600
+  update_session_ttl: 24h
+  diff_max_input_bytes_per_side: 1048576
+  diff_max_lines_per_side: 20000
+  diff_max_output_bytes: 1048576
+  orphan_grace_period: 24h
+  text_encodings: [utf-8, utf-16le, utf-16be, windows-1251]
 servers:
   - url: /
     description: Same origin as the API endpoint
@@ -56,7 +64,6 @@ paths:
       summary: Register a user
       operationId: registerUser
       security: []
-      x-implementation-status: planned-stage-1
       requestBody:
         required: true
         content:
@@ -80,7 +87,6 @@ paths:
       summary: Log in with email and password
       operationId: loginUser
       security: []
-      x-implementation-status: planned-stage-1
       requestBody:
         required: true
         content:
@@ -103,7 +109,6 @@ paths:
       tags: [Authentication]
       summary: Revoke the current authentication token
       operationId: logoutUser
-      x-implementation-status: planned-stage-1
       responses:
         "204":
           description: Token revoked
@@ -114,7 +119,6 @@ paths:
       tags: [Authentication]
       summary: Get the authenticated user
       operationId: getCurrentUser
-      x-implementation-status: planned-stage-1
       responses:
         "200":
           description: Current user
@@ -129,7 +133,6 @@ paths:
       tags: [Workspaces]
       summary: Get the reserved base workspace
       operationId: getBaseWorkspace
-      x-implementation-status: planned-stage-1
       responses:
         "200":
           description: Base workspace
@@ -144,7 +147,6 @@ paths:
       tags: [Workspaces]
       summary: List workspaces available to the current user
       operationId: listWorkspaces
-      x-implementation-status: planned-stage-1
       responses:
         "200":
           description: Workspaces
@@ -160,7 +162,6 @@ paths:
       tags: [Workspaces]
       summary: Create a private workspace
       operationId: createWorkspace
-      x-implementation-status: planned-stage-1
       requestBody:
         required: true
         content:
@@ -187,7 +188,6 @@ paths:
       tags: [Workspaces]
       summary: Get a workspace
       operationId: getWorkspace
-      x-implementation-status: planned-stage-1
       responses:
         "200":
           description: Workspace
@@ -199,6 +199,34 @@ paths:
           $ref: "#/components/responses/ProblemResponse"
         "404":
           $ref: "#/components/responses/ProblemResponse"
+  /workspaces/{workspaceId}/members:
+    parameters:
+      - $ref: "#/components/parameters/WorkspaceID"
+    post:
+      tags: [Workspaces]
+      summary: Add or update a workspace member by email
+      operationId: putWorkspaceMemberByEmail
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MemberByEmailRequest"
+      responses:
+        "200":
+          description: Workspace member
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WorkspaceMember"
+        "400":
+          $ref: "#/components/responses/ProblemResponse"
+        "401":
+          $ref: "#/components/responses/ProblemResponse"
+        "403":
+          $ref: "#/components/responses/ProblemResponse"
+        "404":
+          $ref: "#/components/responses/ProblemResponse"
   /workspaces/{workspaceId}/members/{userId}:
     parameters:
       - $ref: "#/components/parameters/WorkspaceID"
@@ -207,7 +235,6 @@ paths:
       tags: [Workspaces]
       summary: Add or update a workspace member
       operationId: putWorkspaceMember
-      x-implementation-status: planned-stage-1
       requestBody:
         required: true
         content:
@@ -223,6 +250,8 @@ paths:
                 $ref: "#/components/schemas/WorkspaceMember"
         "400":
           $ref: "#/components/responses/ProblemResponse"
+        "401":
+          $ref: "#/components/responses/ProblemResponse"
         "403":
           $ref: "#/components/responses/ProblemResponse"
         "404":
@@ -231,10 +260,13 @@ paths:
       tags: [Workspaces]
       summary: Remove a workspace member
       operationId: removeWorkspaceMember
-      x-implementation-status: planned-stage-1
       responses:
         "204":
           description: Member removed
+        "400":
+          $ref: "#/components/responses/ProblemResponse"
+        "401":
+          $ref: "#/components/responses/ProblemResponse"
         "403":
           $ref: "#/components/responses/ProblemResponse"
         "404":
@@ -247,17 +279,19 @@ paths:
     get:
       tags: [Files]
       summary: List files in a workspace
+      description: Cursor order is case-folded file name ascending, then file ID ascending.
       operationId: listFiles
-      x-implementation-status: planned-stage-2
+      x-implementation-status: implemented
+      parameters:
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/PageLimit"
       responses:
         "200":
           description: Files
           content:
             application/json:
               schema:
-                type: array
-                items:
-                  $ref: "#/components/schemas/File"
+                $ref: "#/components/schemas/FilePage"
         "401":
           $ref: "#/components/responses/ProblemResponse"
         "404":
@@ -266,9 +300,7 @@ paths:
       tags: [Files]
       summary: Upload a file and create version 1
       operationId: createFile
-      x-implementation-status: planned-stage-2
-      parameters:
-        - $ref: "#/components/parameters/IdempotencyKey"
+      x-implementation-status: implemented
       requestBody:
         required: true
         content:
@@ -283,9 +315,11 @@ paths:
                 text_encoding:
                   type: string
                   default: utf-8
+                  enum: [utf-8, utf-16le, utf-16be, windows-1251]
                 content:
                   type: string
                   format: binary
+                  description: Streamed content with a default hard limit of 104857600 bytes.
       responses:
         "201":
           description: Created file
@@ -294,6 +328,12 @@ paths:
               schema:
                 $ref: "#/components/schemas/File"
         "400":
+          $ref: "#/components/responses/ProblemResponse"
+        "401":
+          $ref: "#/components/responses/ProblemResponse"
+        "403":
+          $ref: "#/components/responses/ProblemResponse"
+        "404":
           $ref: "#/components/responses/ProblemResponse"
         "409":
           $ref: "#/components/responses/ProblemResponse"
@@ -308,7 +348,7 @@ paths:
       tags: [Files]
       summary: Get file metadata
       operationId: getFile
-      x-implementation-status: planned-stage-2
+      x-implementation-status: implemented
       responses:
         "200":
           description: File metadata
@@ -316,16 +356,34 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/File"
+        "401":
+          $ref: "#/components/responses/ProblemResponse"
         "404":
           $ref: "#/components/responses/ProblemResponse"
   /files/{fileId}/encoding:
     parameters:
       - $ref: "#/components/parameters/FileID"
+    get:
+      tags: [Files]
+      summary: Get the text encoding used to interpret file bytes
+      operationId: getFileEncoding
+      x-implementation-status: implemented
+      responses:
+        "200":
+          description: Current encoding metadata
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EncodingRequest"
+        "401":
+          $ref: "#/components/responses/ProblemResponse"
+        "404":
+          $ref: "#/components/responses/ProblemResponse"
     patch:
       tags: [Files]
       summary: Change the text encoding used to interpret file bytes
       operationId: updateFileEncoding
-      x-implementation-status: planned-stage-2
+      x-implementation-status: implemented
       requestBody:
         required: true
         content:
@@ -341,6 +399,8 @@ paths:
                 $ref: "#/components/schemas/File"
         "400":
           $ref: "#/components/responses/ProblemResponse"
+        "401":
+          $ref: "#/components/responses/ProblemResponse"
         "403":
           $ref: "#/components/responses/ProblemResponse"
         "404":
@@ -353,17 +413,21 @@ paths:
     get:
       tags: [Files]
       summary: List published file versions
+      description: Cursor order is version number descending.
       operationId: listFileVersions
-      x-implementation-status: planned-stage-2
+      x-implementation-status: implemented
+      parameters:
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/PageLimit"
       responses:
         "200":
           description: Versions ordered by version number descending
           content:
             application/json:
               schema:
-                type: array
-                items:
-                  $ref: "#/components/schemas/FileVersion"
+                $ref: "#/components/schemas/FileVersionPage"
+        "401":
+          $ref: "#/components/responses/ProblemResponse"
         "404":
           $ref: "#/components/responses/ProblemResponse"
   /files/{fileId}/content:
@@ -374,7 +438,7 @@ paths:
       tags: [Files]
       summary: Download current or selected file bytes
       operationId: downloadFile
-      x-implementation-status: planned-stage-2
+      x-implementation-status: implemented
       responses:
         "200":
           description: Immutable file bytes
@@ -383,6 +447,8 @@ paths:
               schema:
                 type: string
                 format: binary
+        "401":
+          $ref: "#/components/responses/ProblemResponse"
         "404":
           $ref: "#/components/responses/ProblemResponse"
   /files/{fileId}/updates:
@@ -392,7 +458,7 @@ paths:
       tags: [Updates]
       summary: Upload a candidate and create an update session
       operationId: createUpdateSession
-      x-implementation-status: planned-stage-3
+      x-implementation-status: implemented
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
@@ -406,6 +472,7 @@ paths:
                 content:
                   type: string
                   format: binary
+                  description: Streamed content with a default hard limit of 104857600 bytes.
       responses:
         "201":
           description: Active update session
@@ -413,6 +480,14 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/UpdateSession"
+        "400":
+          $ref: "#/components/responses/ProblemResponse"
+        "401":
+          $ref: "#/components/responses/ProblemResponse"
+        "403":
+          $ref: "#/components/responses/ProblemResponse"
+        "404":
+          $ref: "#/components/responses/ProblemResponse"
         "409":
           $ref: "#/components/responses/ProblemResponse"
         "413":
@@ -427,7 +502,7 @@ paths:
       tags: [Updates]
       summary: Compare the candidate with its base version
       operationId: getUpdateDiff
-      x-implementation-status: planned-stage-3
+      x-implementation-status: implemented
       responses:
         "200":
           description: Bounded diff result
@@ -435,6 +510,10 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/DiffResult"
+        "401":
+          $ref: "#/components/responses/ProblemResponse"
+        "403":
+          $ref: "#/components/responses/ProblemResponse"
         "404":
           $ref: "#/components/responses/ProblemResponse"
         "409":
@@ -447,9 +526,7 @@ paths:
       tags: [Updates]
       summary: Publish the candidate as the next version
       operationId: resolveUpdateSession
-      x-implementation-status: planned-stage-4
-      parameters:
-        - $ref: "#/components/parameters/IdempotencyKey"
+      x-implementation-status: implemented
       responses:
         "200":
           description: Published version; repeated requests return the same version
@@ -457,6 +534,12 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/FileVersion"
+        "401":
+          $ref: "#/components/responses/ProblemResponse"
+        "403":
+          $ref: "#/components/responses/ProblemResponse"
+        "404":
+          $ref: "#/components/responses/ProblemResponse"
         "409":
           $ref: "#/components/responses/ProblemResponse"
         "423":
@@ -469,7 +552,7 @@ paths:
       tags: [Updates]
       summary: Reject an update candidate
       operationId: rejectUpdateSession
-      x-implementation-status: planned-stage-4
+      x-implementation-status: implemented
       responses:
         "200":
           description: Rejected update session
@@ -477,6 +560,12 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/UpdateSession"
+        "401":
+          $ref: "#/components/responses/ProblemResponse"
+        "403":
+          $ref: "#/components/responses/ProblemResponse"
+        "404":
+          $ref: "#/components/responses/ProblemResponse"
         "409":
           $ref: "#/components/responses/ProblemResponse"
   /files/{fileId}/lock:
@@ -486,7 +575,7 @@ paths:
       tags: [Locks]
       summary: Get the active file lock
       operationId: getFileLock
-      x-implementation-status: planned-stage-5
+      x-implementation-status: implemented
       responses:
         "200":
           description: Active lock
@@ -494,13 +583,15 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/FileLock"
+        "401":
+          $ref: "#/components/responses/ProblemResponse"
         "404":
           $ref: "#/components/responses/ProblemResponse"
     post:
       tags: [Locks]
       summary: Lock a file for writes
       operationId: lockFile
-      x-implementation-status: planned-stage-5
+      x-implementation-status: implemented
       responses:
         "201":
           description: Active lock
@@ -508,6 +599,12 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/FileLock"
+        "401":
+          $ref: "#/components/responses/ProblemResponse"
+        "403":
+          $ref: "#/components/responses/ProblemResponse"
+        "404":
+          $ref: "#/components/responses/ProblemResponse"
         "409":
           $ref: "#/components/responses/ProblemResponse"
         "423":
@@ -517,10 +614,12 @@ paths:
       summary: Unlock a file
       operationId: unlockFile
       description: Allowed to the file creator, locker, workspace editor or owner, and superadmin.
-      x-implementation-status: planned-stage-5
+      x-implementation-status: implemented
       responses:
         "204":
           description: Lock released
+        "401":
+          $ref: "#/components/responses/ProblemResponse"
         "403":
           $ref: "#/components/responses/ProblemResponse"
         "404":
@@ -531,17 +630,23 @@ paths:
     get:
       tags: [Links]
       summary: List automatically created links for a file and its versions
+      description: Cursor order is creation time ascending, then link ID ascending.
       operationId: listFileLinks
-      x-implementation-status: planned-stage-6
+      x-implementation-status: implemented
+      parameters:
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/PageLimit"
       responses:
         "200":
           description: Current and version links
           content:
             application/json:
               schema:
-                type: array
-                items:
-                  $ref: "#/components/schemas/FileLink"
+                $ref: "#/components/schemas/FileLinkPage"
+        "401":
+          $ref: "#/components/responses/ProblemResponse"
+        "403":
+          $ref: "#/components/responses/ProblemResponse"
         "404":
           $ref: "#/components/responses/ProblemResponse"
   /files/{fileId}/links/{linkId}:
@@ -552,10 +657,12 @@ paths:
       tags: [Links]
       summary: Revoke an automatically created link
       operationId: revokeFileLink
-      x-implementation-status: planned-stage-6
+      x-implementation-status: implemented
       responses:
         "204":
           description: Link revoked without replacement
+        "401":
+          $ref: "#/components/responses/ProblemResponse"
         "403":
           $ref: "#/components/responses/ProblemResponse"
         "404":
@@ -573,7 +680,7 @@ paths:
         - {}
         - bearerAuth: []
       description: Base links are public. Private workspace links additionally require bearer authentication and membership.
-      x-implementation-status: planned-stage-6
+      x-implementation-status: implemented
       responses:
         "200":
           description: File bytes
@@ -634,7 +741,9 @@ components:
       required: true
       schema:
         type: string
-        minLength: 32
+        minLength: 43
+        maxLength: 43
+        pattern: "^[A-Za-z0-9_-]{43}$"
     VersionNumber:
       name: version
       in: query
@@ -650,6 +759,24 @@ components:
         type: string
         minLength: 16
         maxLength: 128
+    Cursor:
+      name: cursor
+      in: query
+      required: false
+      description: Opaque cursor returned by the previous page.
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 256
+    PageLimit:
+      name: limit
+      in: query
+      required: false
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 200
+        default: 50
   responses:
     HealthResponse:
       description: Process health
@@ -724,7 +851,10 @@ components:
       properties:
         token:
           type: string
-          writeOnly: true
+          minLength: 43
+          maxLength: 43
+          pattern: "^[A-Za-z0-9_-]{43}$"
+          description: Opaque bearer token returned only by register/login and stored only as a hash by the API.
         user:
           $ref: "#/components/schemas/User"
     User:
@@ -773,6 +903,15 @@ components:
       properties:
         role:
           $ref: "#/components/schemas/WorkspaceRole"
+    MemberByEmailRequest:
+      type: object
+      required: [email, role]
+      properties:
+        email:
+          type: string
+          format: email
+        role:
+          $ref: "#/components/schemas/WorkspaceRole"
     WorkspaceMember:
       type: object
       required: [workspace_id, user, role]
@@ -801,7 +940,7 @@ components:
           type: string
         text_encoding:
           type: string
-          example: utf-8
+          enum: [utf-8, utf-16le, utf-16be, windows-1251]
         current_version:
           $ref: "#/components/schemas/FileVersion"
         created_by:
@@ -842,14 +981,33 @@ components:
         created_at:
           type: string
           format: date-time
+    FilePage:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/File"
+        next_cursor:
+          type: string
+    FileVersionPage:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/FileVersion"
+        next_cursor:
+          type: string
     EncodingRequest:
       type: object
       required: [text_encoding]
       properties:
         text_encoding:
           type: string
-          minLength: 1
-          example: windows-1251
+          enum: [utf-8, utf-16le, utf-16be, windows-1251]
     UpdateSession:
       type: object
       required: [id, file_id, base_version_id, status, expires_at, created_by, created_at]
@@ -883,19 +1041,38 @@ components:
           format: date-time
     DiffResult:
       type: object
-      required: [kind, base_sha256, candidate_sha256, rollback_warning]
+      required: [kind, reason, base, candidate, rollback_warning]
       properties:
         kind:
           type: string
-          enum: [text, binary_or_too_large]
+          enum: [text, metadata_only]
+        reason:
+          type: string
+          enum: [text, binary, decode_error, input_too_large, too_many_lines, output_too_large]
         unified_diff:
           type: string
-        base_sha256:
-          type: string
-        candidate_sha256:
-          type: string
+          description: Present only for kind=text and never exceeds 1048576 UTF-8 bytes.
+        base:
+          $ref: "#/components/schemas/DiffMetadata"
+        candidate:
+          $ref: "#/components/schemas/DiffMetadata"
         rollback_warning:
           type: boolean
+          description: True only when candidate SHA-256 matches a published non-current version of the same file.
+    DiffMetadata:
+      type: object
+      required: [original_name, mime_type, size, sha256]
+      properties:
+        original_name:
+          type: string
+        mime_type:
+          type: string
+        size:
+          type: integer
+          minimum: 0
+        sha256:
+          type: string
+          pattern: "^[a-f0-9]{64}$"
     FileLock:
       type: object
       required: [id, file_id, status, locked_by, created_at]
@@ -939,6 +1116,10 @@ components:
           enum: [current, version]
         token:
           type: string
+          minLength: 43
+          maxLength: 43
+          pattern: "^[A-Za-z0-9_-]{43}$"
+          description: Sensitive capability token stored in plaintext for authorized repeat display; never log it.
         status:
           type: string
           enum: [active, revoked]
@@ -948,3 +1129,13 @@ components:
         revoked_at:
           type: string
           format: date-time
+    FileLinkPage:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/FileLink"
+        next_cursor:
+          type: string
